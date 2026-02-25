@@ -1,144 +1,98 @@
-# Alzheimer-s
-📁 Project Folder Structure
-Multimodal-Alzheimer-Detection-Using-DeepLearning/
-│
-├── dataset/
-│   ├── MRI/
-│   ├── CT/
-│   └── README.md
-│
-├── preprocessing/
-│   ├── data_loader.py
-│   ├── augmentation.py
-│   └── preprocessing.py
-│
-├── models/
-│   ├── cnn_model.py
-│   ├── resnet_model.py
-│   ├── transformer_model.py
-│   └── model_utils.py
-│
-├── training/
-│   ├── train_cnn.py
-│   ├── train_resnet.py
-│   ├── train_transformer.py
-│   └── train_multimodal.py
-│
-├── evaluation/
-│   ├── metrics.py
-│   ├── confusion_matrix.py
-│   └── compare_models.py
-│
-├── results/
-│   ├── saved_models/
-│   ├── graphs/
-│   └── comparison_report.txt
-│
-├── app/
-│   ├── app.py
-│   └── requirements.txt
-│
-├── notebooks/
-│   ├── EDA.ipynb
-│   └── Model_Comparison.ipynb
-│
-├── README.md
-├── requirements.txt
-├── .gitignore
-└── LICENSE
+# Human Activity Recognition using MediaPipe and Machine Learning
 
-📄 What to Write in README.md (Important for Evaluation)
+This project implements an intelligent video surveillance system for recognizing human activities (Walking, Jogging, Cycling, Yoga) by analyzing biomechanical joint angles extracted using MediaPipe Pose.
 
-Here is a professional README content you can paste:
+## Project Structure
+- `extract_features.py`: Processes the training dataset, extracts key joint angles per frame, and generates `training_master.csv`.
+- `train_model.py`: Trains a RandomForestClassifier using the generated dataset, outputs evaluation metrics, and saves the trained model (`activity_model.pkl`).
+- `inference.py`: Uses the trained model to predict activities on new, unseen videos frame-by-frame and applies majority voting for the final video-level prediction.
+- `requirements.txt`: List of required Python packages.
 
-🧠 Multimodal Imaging for Early Alzheimer Detection
-📌 Project Description
+## Dataset Structure
+Ensure your dataset is organized exactly like this in the root directory before running feature extraction:
+```
+Dataset/
+    walking/
+        video1.mp4
+        ...
+    jogging/
+        video1.mp4
+        ...
+    cycling/
+        video1.mp4
+        ...
+    yoga/
+        video1.mp4
+        ...
+```
 
-This project implements and compares multiple Deep Learning models (CNN, ResNet, Vision Transformer) for early-stage Alzheimer’s detection using multimodal brain imaging data such as MRI and CT scans.
+## How to Run Locally
 
-🎯 Objectives
+1. **Install Dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-Train CNN, ResNet, and Transformer models
+2. **Extract Features**
+   Make sure you have placed the videos in the `Dataset/` folder.
+   ```bash
+   python extract_features.py
+   ```
+   This will create a CSV file for each video and combine them into `training_master.csv`.
 
-Compare Accuracy, Precision, Recall, F1-Score
+3. **Train the Model**
+   ```bash
+   python train_model.py
+   ```
+   This trains the model, saves `activity_model.pkl`, and generates a `confusion_matrix.png`.
 
-Detect Alzheimer’s stage
+4. **Inference / Testing**
+   To test a new video:
+   ```bash
+   python inference.py path/to/your/test_video.mp4
+   ```
+   This outputs `test_video_predictions.csv` and prints the final predicted label based on majority voting.
 
-Provide early-stage medical guidance
+---
 
-🏗️ Models Used
-Model	Type	Purpose
-CNN	Custom Deep Learning	Baseline
-ResNet50	Transfer Learning	High accuracy
-Vision Transformer	Attention-based	Advanced modeling
-📊 Evaluation Metrics
+## How to Run in Google Colab
 
-Accuracy
+You can easily run this pipeline in Google Colab using your Google Drive.
 
-Precision
+1. Create a new notebook in Google Colab.
+2. Mount your Google Drive:
+   ```python
+   from google.colab import drive
+   drive.mount('/content/drive')
+   ```
+3. Upload this project folder to your Google Drive (e.g., to `MyDrive/InfosysProject`).
+4. Ensure your `Dataset/` folder is placed inside this project folder in Drive.
+5. In Colab, change the directory to your project folder:
+   ```python
+   import os
+   os.chdir('/content/drive/MyDrive/InfosysProject')
+   ```
+6. Install dependencies (if any are missing from Colab's default environment):
+   ```python
+   !pip install mediapipe opencv-python pandas scikit-learn matplotlib seaborn
+   ```
+7. Run the feature extraction step:
+   ```python
+   !python extract_features.py
+   ```
+8. Train the model:
+   ```python
+   !python train_model.py
+   ```
+9. Test a new video (upload a test video to your drive first):
+   ```python
+   !python inference.py path/to/test_video.mp4
+   ```
 
-Recall
+## Technical Details
 
-F1 Score
-
-Sensitivity
-
-Specificity
-
-Confidence Score
-
-🏥 Stages Detected
-
-Non Demented
-
-Very Mild Demented
-
-Mild Demented
-
-Moderate Demented
-
-🚀 How to Run
-pip install -r requirements.txt
-python training/train_resnet.py
-python evaluation/compare_models.py
-🔧 How to Create Git Repository (Step-by-Step)
-1️⃣ Initialize Git
-git init
-2️⃣ Add Files
-git add .
-3️⃣ Commit
-git commit -m "Initial commit - Multimodal Alzheimer Detection"
-4️⃣ Connect to GitHub
-
-Create repo on GitHub, then:
-
-git remote add origin https://github.com/yourusername/Multimodal-Alzheimer-Detection-Using-DeepLearning.git
-git branch -M main
-git push -u origin main
-⭐ Extra Professional Tips
-✅ Add These to .gitignore
-__pycache__/
-*.h5
-*.pth
-*.pt
-dataset/
-saved_models/
-.env
-✅ Upload:
-
-Only code
-
-Sample images (few only)
-
-Trained model weights (optional, if small)
-
-📊 For Research-Level Impression
-
-You can also include:
-
-📈 Model accuracy comparison graph
-
-🧠 Grad-CAM visualization
-
-📄 PDF report in repo
-
+- **Feature Extraction**: Uses `mediapipe.solutions.pose` to find 33 body landmarks.
+- **Angles Calculated**: Left/Right Knee, Left/Right Elbow, Left/Right Shoulder, and Left/Right Hip angles are computed using 3-point geometry.
+- **Model**: `RandomForestClassifier` with 100 estimators.
+- **Evaluation**: Split 80/20 for training and validation. Metrics include Accuracy, Precision, Recall, F1-Score, and a visual Confusion Matrix.
+- **Voting Logic**: The final prediction for a test video is determined by identifying the most frequently predicted activity across all processed frames (majority voting).

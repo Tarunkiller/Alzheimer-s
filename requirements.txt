@@ -1,0 +1,14 @@
+numpy
+pandas
+opencv-python
+mediapipe
+scikit-learn
+matplotlib
+seaborn
+joblib
+streamlit
+kagglehub
+torch
+torchvision
+scikit-image
+streamlit-option-menu
