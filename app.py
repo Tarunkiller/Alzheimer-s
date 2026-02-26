@@ -152,7 +152,7 @@ def build_knn_model(base_path):
                 h, w = arr.shape
                 # Center ROI (Ventricle and Hippocampal regions)
                 center = arr[int(h*0.25):int(h*0.75), int(w*0.25):int(w*0.75)]
-                ent = skimage.measure.shannon_entropy(center)
+                ent = measure.shannon_entropy(center)
                 dark = np.sum(center < 50) / (center.size + 1)
                 X.append([ent, dark])
                 y.append(label)
@@ -302,7 +302,7 @@ elif selected == "Neural Imaging":
             m4.metric("Max Density", f"{img_np.max()}")
             
             entropy_img = original_img.resize((64, 64)).convert('L')
-            entropy_val = skimage.measure.shannon_entropy(np.array(entropy_img))
+            entropy_val = measure.shannon_entropy(np.array(entropy_img))
             st.markdown("<br>", unsafe_allow_html=True)
             st.metric("Information Saturation (Shannon Entropy)", f"{entropy_val:.5f} bits")
             st.progress(entropy_val/10) # Assuming max entropy roughly ~ 8 for 8-bit image
@@ -495,7 +495,7 @@ def get_vit(num_classes):
         else:
             with st.spinner("Benchmarking structural features across architectures..."):
                 gray_image = user_img.resize((64, 64)).convert('L')
-                entropy_val = skimage.measure.shannon_entropy(np.array(gray_image))
+                entropy_val = measure.shannon_entropy(np.array(gray_image))
                 mean_brightness = np.mean(np.array(gray_image)) / 255.0
                 
                 # Simulate accuracies
@@ -595,7 +595,7 @@ elif selected == "Diagnostic Sandbox":
                 valid_mask = grayscale_mask & center_mask
                 
                 center_roi = gray_array[int(h*0.25):int(h*0.75), int(w*0.25):int(w*0.75)]
-                entropy_val = skimage.measure.shannon_entropy(center_roi)
+                entropy_val = measure.shannon_entropy(center_roi)
                 
                 valid_pixels = gray_array[valid_mask]
                 dark_ratio = np.sum(valid_pixels < 50) / max(1, len(valid_pixels))
