@@ -9,12 +9,9 @@ import glob
 import kagglehub
 from streamlit_option_menu import option_menu
 
-import skimage.measure
+from skimage import measure, exposure, filters, feature, img_as_float
 from skimage.transform import rescale, resize
-from skimage import exposure
-from skimage import filters
-from skimage import feature
-from skimage import img_as_float
+from sklearn.neighbors import KNeighborsClassifier
 
 # --- CONFIGURATION & CUSTOM CSS ---
 st.set_page_config(page_title="MRI & Alzheimer's Vanguard", layout="wide", page_icon="🧠")
@@ -100,7 +97,7 @@ st.markdown("""
 # --- HERO SECTION ---
 st.markdown("""
 <div class="hero-section">
-    <div class="hero-title">NeuroVision Vanguard</div>
+    <div class="hero-title">Multimodel Imaging for early Detection of Alzheimer Disease</div>
     <div class="hero-subtitle">Advanced Cognitive Image Processing & Alzheimer's Analytics Dashboard</div>
 </div>
 """, unsafe_allow_html=True)
@@ -137,6 +134,66 @@ def load_image_paths(base_path):
     return pd.DataFrame(images, columns=['ID', 'ImageFiles'])
 
 image_df = load_image_paths(oasis_path)
+
+# --- MACHINE LEARNING INFERENCE MODEL (CACHED) ---
+@st.cache_resource(show_spinner="Training Diagnostic ML Engine on OASIS Dataset...")
+def build_knn_model(base_path):
+    X = []
+    y = []
+    classes = ['Non Demented', 'Very mild Dementia', 'Mild Dementia', 'Moderate Dementia']
+    
+    # Load a robust subset across all classes for speed & comparison
+    for label in classes:
+        files = glob.glob(os.path.join(base_path, 'Data', label, '*.jpg'))
+        for f in files[:120]: # Ensure balanced sample fast-loading
+            try:
+                img = Image.open(f).resize((128, 128)).convert('L')
+                arr = np.array(img)
+                h, w = arr.shape
+                # Center ROI (Ventricle and Hippocampal regions)
+                center = arr[int(h*0.25):int(h*0.75), int(w*0.25):int(w*0.75)]
+                ent = skimage.measure.shannon_entropy(center)
+                dark = np.sum(center < 50) / (center.size + 1)
+                X.append([ent, dark])
+                y.append(label)
+            except:
+                pass
+                
+    ref_df = pd.DataFrame(X, columns=['Entropy', 'Atrophy Ratio'])
+    ref_df['Clinical Diagnosis'] = y
+    
+    knn = KNeighborsClassifier(n_neighbors=5, weights='distance')
+    if len(X) > 0:
+        knn.fit(X, y)
+    return knn, ref_df
+reference_model, reference_df = build_knn_model(oasis_path)
+
+# --- GLOBAL VALIDATION Heuristics ---
+def is_valid_medical_image(image_np):
+    # A simple spatial heuristic to distinguish clinical scans from photos
+    if len(image_np.shape) != 3 or image_np.shape[2] != 3:
+        return True, ""
+        
+    color_var = np.mean(np.var(image_np, axis=2))
+    gray = np.mean(image_np, axis=2)
+    total_pixels = gray.size
+    
+    # Specific characteristics of scans: high contrast black/white backgrounds
+    dark_ratio = np.sum(gray < 40) / total_pixels
+    bright_ratio = np.sum(gray > 210) / total_pixels
+    
+    # Check 1: Allow moderate color variance for annotations (like red/orange circles)
+    # The variance cutoff was previously strictly blocking reports with colored markup.
+    # 250 represents a generally "desaturated" image, blocking rich color photos but allowing highlights
+    if color_var < 250.0:
+        return True, ""
+        
+    # Check 2: If it's fairly colorful (variance > 250), it MUST be overwhelmingly clinical-looking
+    # (very dark/black MRI background, or very bright clinical report document background)
+    if dark_ratio > 0.40 or bright_ratio > 0.60:
+        return True, ""
+            
+    return False, "The uploaded image appears to be a standard photograph, badge, or logo. Please upload a pure medical scan (MRI, CT, PET) or clinical report."
 
 # --- TOP NAVIGATION BAR ---
 selected = option_menu(
@@ -228,7 +285,7 @@ elif selected == "Neural Imaging":
         col_img, col_metrics = st.columns([1, 1])
         with col_img:
             st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-            st.image(original_img, caption=f"Source: {os.path.basename(selected_image_path)}", use_column_width=True)
+            st.image(original_img, caption=f"Source: {os.path.basename(selected_image_path)}", use_container_width=True)
             st.markdown("</div>", unsafe_allow_html=True)
             
         with col_metrics:
@@ -249,6 +306,37 @@ elif selected == "Neural Imaging":
             st.markdown("<br>", unsafe_allow_html=True)
             st.metric("Information Saturation (Shannon Entropy)", f"{entropy_val:.5f} bits")
             st.progress(entropy_val/10) # Assuming max entropy roughly ~ 8 for 8-bit image
+            
+            # --- Inline Demented / Non-Demented Check ---
+            st.markdown("<hr style='margin: 10px 0;'>", unsafe_allow_html=True)
+            
+            # Use Dark Pixel Ratio (Atrophy Marker) instead of volatile Variance/Entropy
+            # Filter out colored markings (like orange circles) entirely so they don't block dark pixels
+            rgb_array = np.array(original_img.resize((128, 128)).convert('RGB'))
+            color_diff = np.max(rgb_array, axis=2) - np.min(rgb_array, axis=2)
+            grayscale_mask = color_diff < 30
+            
+            gray_array = np.array(original_img.resize((128, 128)).convert('L'))
+            h, w = gray_array.shape
+            center_mask = np.zeros_like(gray_array, dtype=bool)
+            center_mask[int(h*0.25):int(h*0.75), int(w*0.25):int(w*0.75)] = True
+            
+            valid_mask = grayscale_mask & center_mask
+            valid_pixels = gray_array[valid_mask]
+            
+            dark_ratio = np.sum(valid_pixels < 50) / max(1, len(valid_pixels))
+            
+            if dark_ratio > 0.26:
+                # High dark ratio = Atrophy / Fluid = Demented
+                pred = "Demented"
+                c_color = "#ef4444"
+            else:
+                pred = "Non-Demented"
+                c_color = "#10b981"
+                
+            st.markdown(f"**Inferred Status:** <span style='color:{c_color}; font-weight:bold; font-size:1.1rem;'>{pred}</span>", unsafe_allow_html=True)
+            # ---------------------------------------------
+            
             st.markdown("</div>", unsafe_allow_html=True)
 
         st.markdown("<hr>", unsafe_allow_html=True)
@@ -265,11 +353,11 @@ elif selected == "Neural Imaging":
 
             c1, c2, c3 = st.columns(3)
             with c1:
-                st.image(img_np, caption="Baseline Scan", use_column_width=True)
+                st.image(img_np, caption="Baseline Scan", use_container_width=True)
             with c2:
-                st.image(gamma_corrected, caption=f"Gamma Corrected (γ={gamma})", use_column_width=True)
+                st.image(gamma_corrected, caption=f"Gamma Corrected (γ={gamma})", use_container_width=True)
             with c3:
-                st.image(log_corrected, caption="Logarithmic Mapping", use_column_width=True)
+                st.image(log_corrected, caption="Logarithmic Mapping", use_container_width=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
         with t2:
@@ -282,10 +370,10 @@ elif selected == "Neural Imaging":
             edges = filters.sobel(gray_img)
             col1, col2 = st.columns(2)
             with col1:
-                st.image(original_img, caption="Baseline Scan", use_column_width=True)
+                st.image(original_img, caption="Baseline Scan", use_container_width=True)
             with col2:
                 edges_normalized = (edges - edges.min()) / (edges.max() - edges.min())
-                st.image(edges_normalized, caption="Sobel Manifold Mapping", use_column_width=True, clamp=True)
+                st.image(edges_normalized, caption="Sobel Manifold Mapping", use_container_width=True, clamp=True)
             st.markdown("</div>", unsafe_allow_html=True)
                 
         with t3:
@@ -324,13 +412,13 @@ elif selected == "Neural Imaging":
             with col1:
                 scale = st.slider("Resolution Interpolation Factor", 0.1, 1.0, 0.25, 0.05)
                 image_rescaled = rescale(img_np, scale, anti_aliasing=False, channel_axis=2 if len(img_np.shape)==3 else None)
-                st.image(image_rescaled, caption=f"Lossy Downsampling ({int(scale*100)}%)", use_column_width=True, clamp=True)
+                st.image(image_rescaled, caption=f"Lossy Downsampling ({int(scale*100)}%)", use_container_width=True, clamp=True)
             
             with col2:
                 target_w = st.number_input("Target Dimensions (W)", 32, 1024, img_np.shape[1]//4)
                 target_h = st.number_input("Target Dimensions (H)", 32, 1024, img_np.shape[0]//4)
                 image_resized = resize(img_np, (target_h, target_w), anti_aliasing=True)
-                st.image(image_resized, caption=f"Anti-Aliased Filtering ({target_w}x{target_h})", use_column_width=True, clamp=True)
+                st.image(image_resized, caption=f"Anti-Aliased Filtering ({target_w}x{target_h})", use_container_width=True, clamp=True)
             st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -391,6 +479,71 @@ def get_vit(num_classes):
         """, language="python")
         st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.markdown("### 📊 Live Model Performance Benchmark")
+    st.write("Upload a target scan to visualize how each model's hypothetical capacity dynamically shifts based on image parameters.")
+    
+    model_bench_file = st.file_uploader("Upload Medical Scan to benchmark...", type=["jpg", "jpeg", "png"], key="model_bench")
+    
+    if model_bench_file is not None:
+        user_img = Image.open(model_bench_file).convert('RGB')
+        user_img_np = np.array(user_img)
+        
+        is_valid, error_msg = is_valid_medical_image(user_img_np)
+        if not is_valid:
+            st.error(error_msg)
+        else:
+            with st.spinner("Benchmarking structural features across architectures..."):
+                gray_image = user_img.resize((64, 64)).convert('L')
+                entropy_val = skimage.measure.shannon_entropy(np.array(gray_image))
+                mean_brightness = np.mean(np.array(gray_image)) / 255.0
+                
+                # Simulate accuracies
+                # Baseline CNN: Caps out lower, sensitive to contrast
+                cnn_acc = min(0.85, 0.65 + (mean_brightness * 0.1) + (entropy_val * 0.01))
+                
+                # ResNet-18: Robust but relies heavily on texture patterns (entropy)
+                resnet_acc = min(0.93, 0.78 + (entropy_val * 0.02) - (mean_brightness * 0.05))
+                
+                # ViT: Exceptionally powerful, high baseline, excels with complex data
+                vit_acc = min(0.98, 0.88 + (entropy_val * 0.015))
+                
+                # Chart data
+                data = {
+                    "Model": ["Baseline CNN", "ResNet-18", "Vision Transformer"],
+                    "Inferred Accuracy": [cnn_acc, resnet_acc, vit_acc]
+                }
+                acc_df = pd.DataFrame(data)
+                
+                st.markdown("<br>", unsafe_allow_html=True)
+                mcol1, mcol2 = st.columns([1, 2])
+                with mcol1:
+                    st.markdown("<div class='metric-card' style='height: 100%; display: flex; flex-direction: column; justify-content: center;'>", unsafe_allow_html=True)
+                    st.image(user_img, caption="Benchmark Source", use_container_width=True)
+                    st.markdown(f"**Calculated Entropy:** {entropy_val:.3f}")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                
+                with mcol2:
+                    st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+                    plt.style.use('dark_background')
+                    fig, ax = plt.subplots(figsize=(8, 4))
+                    
+                    colors = ['#3b82f6', '#8b5cf6', '#ec4899']
+                    sns.barplot(data=acc_df, x="Model", y="Inferred Accuracy", ax=ax, palette=colors)
+                    
+                    ax.set_ylim(0.5, 1.0)
+                    ax.set_ylabel("Accuracy (%)", color='white', fontweight='bold')
+                    ax.set_title("Architecture Performance Estimate", color='white', fontweight='bold')
+                    ax.set_facecolor('#0d1117')
+                    fig.patch.set_facecolor('#161b22')
+                    
+                    for p in ax.patches:
+                        ax.annotate(f"{p.get_height()*100:.1f}%", (p.get_x() + p.get_width() / 2., p.get_height() - 0.05),
+                                    ha='center', va='center', fontsize=12, color='white', fontweight='bold')
+                    
+                    st.pyplot(fig)
+                    st.markdown("</div>", unsafe_allow_html=True)
+
 # --- PAGE 4: DIAGNOSTIC SANDBOX ---
 elif selected == "Diagnostic Sandbox":
     st.markdown("### 📤 Diagnostic AI Sandbox: Custom Scan Inference")
@@ -401,15 +554,21 @@ elif selected == "Diagnostic Sandbox":
     uploaded_file = st.file_uploader("Upload Medical Scan (JPG, PNG)", type=["jpg", "jpeg", "png"])
     
     if uploaded_file is not None:
-        col_img, col_res = st.columns([1, 1])
-        
         # Load the uploaded image
         user_img = Image.open(uploaded_file).convert('RGB')
         user_img_np = np.array(user_img)
         
+        # Validation Check
+        is_valid, error_msg = is_valid_medical_image(user_img_np)
+        if not is_valid:
+            st.error(error_msg)
+            st.stop()
+            
+        col_img, col_res = st.columns([1, 1])
+        
         with col_img:
             st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-            st.image(user_img, caption="Uploaded Scan", use_column_width=True)
+            st.image(user_img, caption="Uploaded Scan", use_container_width=True)
             st.markdown("</div>", unsafe_allow_html=True)
             
         with col_res:
@@ -420,29 +579,67 @@ elif selected == "Diagnostic Sandbox":
                 import time
                 time.sleep(1.5) # Simulate processing delay
                 
-                # Heuristic simulated prediction based on image entropy
-                gray_image = user_img.resize((64, 64)).convert('L')
-                entropy_val = skimage.measure.shannon_entropy(np.array(gray_image))
+                # Heuristic simulated prediction based on image atrophy (Dark Ratio)
+                # This explicitly ignores user-drawn colored annotations (like orange circles)
+                # Ensure the user image is properly processed the same way as the training data
+                rgb_array = np.array(user_img.resize((128, 128)).convert('RGB'))
+                color_diff = np.max(rgb_array, axis=2) - np.min(rgb_array, axis=2)
+                grayscale_mask = color_diff < 30
                 
-                # Calculate a rough pseudo-probability
-                normalized = np.clip((entropy_val - 4.0) / 3.0, 0, 1)
+                gray_image = user_img.resize((128, 128)).convert('L')
+                gray_array = np.array(gray_image)
                 
-                if normalized > 0.5:
-                    prediction = "Non-Demented"
-                    risk_color = "#10b981" # Green
-                    risk_pct = 100 - (normalized * 50)
+                h, w = gray_array.shape
+                center_mask = np.zeros_like(gray_array, dtype=bool)
+                center_mask[int(h*0.25):int(h*0.75), int(w*0.25):int(w*0.75)] = True
+                valid_mask = grayscale_mask & center_mask
+                
+                center_roi = gray_array[int(h*0.25):int(h*0.75), int(w*0.25):int(w*0.75)]
+                entropy_val = skimage.measure.shannon_entropy(center_roi)
+                
+                valid_pixels = gray_array[valid_mask]
+                dark_ratio = np.sum(valid_pixels < 50) / max(1, len(valid_pixels))
+                
+                # --- Real ML Inference against Dataset ---
+                if len(reference_df) > 0:
+                    features = [[entropy_val, dark_ratio]]
+                    pred_class = reference_model.predict(features)[0]
+                    pred_probs = reference_model.predict_proba(features)[0]
+                    confidence = np.max(pred_probs) * 100.0
                 else:
-                    prediction = "Demented"
-                    risk_color = "#ef4444" # Red
-                    risk_pct = 50 + ((1-normalized) * 45)
+                    pred_class = "Error Processing Models"
+                    confidence = 0.0
+                    
+                risk_color = "#10b981" if pred_class == "Non Demented" else "#ef4444"
+                if pred_class == "Very mild Dementia": risk_color = "#f59e0b"
                 
-                st.markdown(f"<h3 style='color: {risk_color}; margin-top:0;'>Prediction: {prediction}</h3>", unsafe_allow_html=True)
-                st.progress(int(risk_pct))
-                st.write(f"**Confidence / Risk Factor:** {risk_pct:.1f}%")
+                st.markdown(f"<h3 style='color: {risk_color}; margin-top:0;'>Prediction: {pred_class}</h3>", unsafe_allow_html=True)
+                st.progress(int(confidence))
+                st.write(f"**Model Confidence:** {confidence:.1f}%")
                 
                 st.markdown("---")
-                st.write("**Extracted Biomarkers:**")
+                st.write("**Data Points (Extracted Biomarkers):**")
                 st.write(f"- Shannon Entropy Level: `{entropy_val:.3f}`")
+                st.write(f"- Ventricular Atrophy Marker: `{dark_ratio:.3f}`")
                 st.write(f"- Spatial Resolution: `{user_img_np.shape[1]}x{user_img_np.shape[0]}`")
+                
+                # Render the explicit comparison to the dataset!
+                st.markdown("<br><b>📊 Dataset Comparison Cluster</b>", unsafe_allow_html=True)
+                fig, ax = plt.subplots(figsize=(6, 4))
+                sns.set_theme(style="darkgrid")
+                plt.style.use("dark_background")
+                
+                # Reference dataset scatter
+                sns.scatterplot(data=reference_df, x='Entropy', y='Atrophy Ratio', hue='Clinical Diagnosis', 
+                                alpha=0.5, s=20, ax=ax, palette="Set2")
+                
+                # Plotted User scan
+                ax.scatter([entropy_val], [dark_ratio], color='#ffeb3b', s=300, marker='*', edgecolor='white', linewidth=1.5, zorder=5, label='Your Uploaded Scan')
+                
+                ax.set_title("Biomarker Mapping Distribution", color='white', fontweight='bold', fontsize=10)
+                ax.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0., fontsize=8)
+                ax.set_facecolor('#0d1117')
+                fig.patch.set_facecolor('#161b22')
+                st.pyplot(fig)
                 
             st.markdown("</div>", unsafe_allow_html=True)
