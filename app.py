@@ -400,8 +400,8 @@ elif selected == "Diagnostic Sandbox":
 
     uploaded_file = st.file_uploader("Upload Medical Scan (JPG, PNG)", type=["jpg", "jpeg", "png"])
 
-    # ---------- MRI CHECK ----------
-    def is_mri(image_np):
+    # ---------- SMART MULTI-SCAN DETECTOR ----------
+    def detect_scan_type(image_np):
         gray = np.mean(image_np, axis=2)
 
         color_var = np.mean(np.var(image_np, axis=2))
@@ -411,52 +411,40 @@ elif selected == "Diagnostic Sandbox":
         dark_ratio = np.sum(gray < 60) / gray.size
         bright_ratio = np.sum(gray > 180) / gray.size
 
-        if (
-            color_var < 1500 and
-            edge_density > 0.005 and
-            (dark_ratio > 0.02 or bright_ratio > 0.02)
-        ):
-            return True
-        return False
+        # MRI scoring
+        mri_score = 0
+        if color_var < 1800: mri_score += 1
+        if edge_density > 0.005: mri_score += 1
+        if dark_ratio > 0.02: mri_score += 1
 
-    # ---------- CT CHECK ----------
-    def is_ct(image_np):
-        gray = np.mean(image_np, axis=2)
+        # CT scoring
+        ct_score = 0
+        if bright_ratio > 0.05: ct_score += 1
+        if edge_density > 0.01: ct_score += 1
+        if color_var < 2000: ct_score += 1
 
-        bright_ratio = np.sum(gray > 220) / gray.size
-        mid_ratio = np.sum((gray > 80) & (gray < 200)) / gray.size
+        # PET scoring
+        pet_score = 0
+        if color_var > 2500: pet_score += 2
+        if np.std(image_np) > 60: pet_score += 1
 
-        if bright_ratio > 0.02 and mid_ratio > 0.2:
-            return True
-        return False
+        scores = {"MRI": mri_score, "CT": ct_score, "PET": pet_score}
+        best_type = max(scores, key=scores.get)
 
-    # ---------- PET CHECK ----------
-    def is_pet(image_np):
-        color_std = np.std(image_np)
+        if scores[best_type] < 2:
+            return None, scores
 
-        if color_std > 50:
-            return True
-        return False
+        return best_type, scores
 
-    # ---------- MASTER DETECTOR ----------
-    def detect_scan_type(image_np):
-        if is_mri(image_np):
-            return "MRI"
-        elif is_ct(image_np):
-            return "CT"
-        elif is_pet(image_np):
-            return "PET"
-        else:
-            return None
 
     if uploaded_file is not None:
 
         user_img = Image.open(uploaded_file).convert('RGB')
         user_img_np = np.array(user_img)
 
-        scan_type = detect_scan_type(user_img_np)
+        scan_type, scores = detect_scan_type(user_img_np)
 
-        # ❌ Reject non-medical images
+        # ❌ Reject invalid
         if scan_type is None:
             st.error("❌ Invalid input. Only MRI / CT / PET scans are allowed.")
             st.stop()
@@ -472,6 +460,8 @@ elif selected == "Diagnostic Sandbox":
             st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
 
             st.success(f"✅ Detected Scan Type: {scan_type}")
+            st.write(f"🔍 Scores → MRI: {scores['MRI']} | CT: {scores['CT']} | PET: {scores['PET']}")
+
             st.markdown("#### ⚙️ AI Inference Engine")
 
             with st.spinner("Analyzing brain structure..."):
@@ -488,11 +478,15 @@ elif selected == "Diagnostic Sandbox":
                 edge = filters.sobel(arr)
                 edge_density = np.mean(edge)
 
-                # 🔹 Scoring Logic
-                score = (entropy / 8) * 0.6 + dark_ratio * 0.25 + edge_density * 5 * 0.15
+                # 🔹 Normalization
+                entropy_norm = entropy / 8
+                edge_norm = min(edge_density * 5, 1)
+
+                # 🔹 Improved Scoring Model
+                score = (entropy_norm * 0.5) + (dark_ratio * 0.3) + (edge_norm * 0.2)
 
                 # 🔹 Prediction
-                if score > 0.5:
+                if score > 0.55:
                     pred = "Non-Demented"
                     color = "#10b981"
                     conf = score * 100
@@ -507,10 +501,15 @@ elif selected == "Diagnostic Sandbox":
                 st.write(f"Confidence: {conf:.2f}%")
 
                 st.markdown("---")
-                st.write("### Extracted Features")
+                st.write("### 📊 Extracted Features")
                 st.write(f"Entropy: `{entropy:.3f}`")
                 st.write(f"Dark Pixel Ratio: `{dark_ratio:.3f}`")
                 st.write(f"Edge Density: `{edge_density:.4f}`")
                 st.write(f"Resolution: `{user_img_np.shape[1]} x {user_img_np.shape[0]}`")
+
+                st.markdown("---")
+                st.write("### 📈 Model Metrics")
+                st.write(f"Decision Score: `{score:.3f}`")
+                st.write("Model Type: Heuristic Feature-Based Classifier")
 
             st.markdown("</div>", unsafe_allow_html=True)
