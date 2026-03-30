@@ -2425,7 +2425,7 @@ best_model_weights_path = os.path.join(save_dir, f"{best_model_name}_best_weight
 torch.save(best_model.state_dict(), best_model_weights_path)
 
 print(f"State dictionary of the best model ({best_model_name}) saved to: {best_model_weights_path}")
-pip install streamlit
+!pip install streamlit
 import streamlit as st
 
 # Application title
