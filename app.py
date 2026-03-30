@@ -390,55 +390,71 @@ def get_vit(num_classes):
     return model
         """, language="python")
         st.markdown("</div>", unsafe_allow_html=True)
-elif selected == "Diagnostic Sandbox":
-    st.markdown("### 📤 Diagnostic AI Sandbox: Custom Scan Inference")
-    st.write("Upload MRI / CT / PET scan for intelligent detection")
 
-    st.markdown("<hr>", unsafe_allow_html=True)
+#page 4
+def detect_scan_type(image_np):
+    gray = np.mean(image_np, axis=2)
 
-    uploaded_file = st.file_uploader("Upload Medical Scan (JPG, PNG)", type=["jpg", "jpeg", "png"])
+    color_var = np.mean(np.var(image_np, axis=2))
+    edges = filters.sobel(gray)
+    edge_density = np.mean(edges)
 
-    # ---------- DETECTION FUNCTION ----------
-    def detect_scan_type(image_np):
-        gray = np.mean(image_np, axis=2)
+    dark_ratio = np.sum(gray < 60) / gray.size
+    bright_ratio = np.sum(gray > 180) / gray.size
+    very_bright_ratio = np.sum(gray > 230) / gray.size
 
-        color_var = np.mean(np.var(image_np, axis=2))
-        edges = filters.sobel(gray)
-        edge_density = np.mean(edges)
+    # ---------- MRI ----------
+    mri_score = 0
+    if color_var < 1200: mri_score += 1
+    if edge_density > 0.005: mri_score += 1
+    if dark_ratio > 0.03: mri_score += 1
 
-        dark_ratio = np.sum(gray < 60) / gray.size
-        bright_ratio = np.sum(gray > 180) / gray.size
-        very_bright_ratio = np.sum(gray > 230) / gray.size  # ✅ FIXED
+    # ---------- CT ----------
+    ct_score = 0
+    if very_bright_ratio > 0.05: ct_score += 2
+    if bright_ratio > 0.12: ct_score += 1
+    if edge_density > 0.01: ct_score += 1
 
-        # MRI
-        mri_score = 0
-        if color_var < 1500: mri_score += 1
-        if edge_density > 0.005: mri_score += 1
-        if dark_ratio > 0.02: mri_score += 1
+    # ---------- PET ----------
+    pet_score = 0
+    if color_var > 2500: pet_score += 2
+    if np.std(image_np) > 60: pet_score += 1
 
-        # CT
-        ct_score = 0
-        if very_bright_ratio > 0.02: ct_score += 2
-        if bright_ratio > 0.08: ct_score += 1
-        if edge_density > 0.01: ct_score += 1
+    scores = {"MRI": mri_score, "CT": ct_score, "PET": pet_score}
 
-        # PET
-        pet_score = 0
-        if color_var > 2500: pet_score += 2
-        if np.std(image_np) > 60: pet_score += 1
+    # ---------- MAIN DECISION ----------
+    best_type = max(scores, key=scores.get)
 
-        scores = {"MRI": mri_score, "CT": ct_score, "PET": pet_score}
+    # ---------- 🔥 TIE BREAK LOGIC ----------
+    values = list(scores.values())
+    if values.count(max(values)) > 1:
 
-        # Priority logic
-        if ct_score >= 2:
-            return "CT", scores
-        elif mri_score >= 2:
-            return "MRI", scores
-        elif pet_score >= 2:
-            return "PET", scores
-        else:
-            return None, scores
+        # MRI vs CT tie
+        if mri_score == ct_score:
+            if very_bright_ratio > 0.05:
+                best_type = "CT"
+            else:
+                best_type = "MRI"
 
+        # MRI vs PET tie
+        elif mri_score == pet_score:
+            if color_var > 2000:
+                best_type = "PET"
+            else:
+                best_type = "MRI"
+
+        # CT vs PET tie
+        elif ct_score == pet_score:
+            if very_bright_ratio > 0.05:
+                best_type = "CT"
+            else:
+                best_type = "PET"
+
+    # ---------- FINAL VALIDATION ----------
+    if scores[best_type] < 2:
+        return None, scores
+
+    return best_type, scores
     # ---------- MAIN EXECUTION ----------
     if uploaded_file is not None:
 
