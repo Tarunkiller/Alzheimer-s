@@ -394,99 +394,123 @@ def get_vit(num_classes):
 # --- PAGE 4: DIAGNOSTIC SANDBOX ---
 elif selected == "Diagnostic Sandbox":
     st.markdown("### 📤 Diagnostic AI Sandbox: Custom Scan Inference")
-    st.write("Upload MRI scan for intelligent image-based Alzheimer detection")
+    st.write("Upload MRI / CT / PET scan for intelligent detection")
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    uploaded_file = st.file_uploader("Upload Medical Scan", type=["jpg","jpeg","png"])
+    uploaded_file = st.file_uploader("Upload Medical Scan (JPG, PNG)", type=["jpg", "jpeg", "png"])
 
- # 🔥 STRICT IMAGE VALIDATION FUNCTION
-def is_medical_scan(image_np):
-    gray = np.mean(image_np, axis=2)
+    # ---------- MRI CHECK ----------
+    def is_mri(image_np):
+        gray = np.mean(image_np, axis=2)
 
-    # 1️⃣ Color variance (MRI = low color variation)
-    color_var = np.mean(np.var(image_np, axis=2))
+        color_var = np.mean(np.var(image_np, axis=2))
+        edges = filters.sobel(gray)
+        edge_density = np.mean(edges)
 
-    # 2️⃣ Edge structure (brain edges exist)
-    edges = filters.sobel(gray)
-    edge_density = np.mean(edges)
+        dark_ratio = np.sum(gray < 60) / gray.size
+        bright_ratio = np.sum(gray > 180) / gray.size
 
-    # 3️⃣ Intensity distribution
-    dark_ratio = np.sum(gray < 60) / gray.size
-    bright_ratio = np.sum(gray > 180) / gray.size
+        if (
+            color_var < 1500 and
+            edge_density > 0.005 and
+            (dark_ratio > 0.02 or bright_ratio > 0.02)
+        ):
+            return True
+        return False
 
-    # ✅ STRICT CONDITION (reject posters)
-    if (
-        color_var < 100 and           # must be grayscale-like
-        edge_density > 0.01 and       # must have structure
-        dark_ratio > 0.05 and         # must have dark regions
-        bright_ratio > 0.05           # must have bright regions
-    ):
-        return True
+    # ---------- CT CHECK ----------
+    def is_ct(image_np):
+        gray = np.mean(image_np, axis=2)
 
-    return False
+        bright_ratio = np.sum(gray > 220) / gray.size
+        mid_ratio = np.sum((gray > 80) & (gray < 200)) / gray.size
 
+        if bright_ratio > 0.02 and mid_ratio > 0.2:
+            return True
+        return False
 
-if uploaded_file is not None:
+    # ---------- PET CHECK ----------
+    def is_pet(image_np):
+        color_std = np.std(image_np)
 
-    user_img = Image.open(uploaded_file).convert('RGB')
-    user_img_np = np.array(user_img)
+        if color_std > 50:
+            return True
+        return False
 
-    # 🔴 HARD VALIDATION (IMPORTANT)
-    if not is_medical_scan(user_img_np):
-        st.error("❌ This is NOT a valid MRI/CT medical scan. Please upload a brain scan.")
-        st.stop()
+    # ---------- MASTER DETECTOR ----------
+    def detect_scan_type(image_np):
+        if is_mri(image_np):
+            return "MRI"
+        elif is_ct(image_np):
+            return "CT"
+        elif is_pet(image_np):
+            return "PET"
+        else:
+            return None
 
-    col_img, col_res = st.columns([1,1])
+    if uploaded_file is not None:
 
-    with col_img:
-        st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
-        st.image(user_img, caption="Uploaded Scan", use_column_width=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        user_img = Image.open(uploaded_file).convert('RGB')
+        user_img_np = np.array(user_img)
 
-    with col_res:
-        st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+        scan_type = detect_scan_type(user_img_np)
 
-        st.markdown("#### ⚙️ AI Inference Engine")
+        # ❌ Reject non-medical images
+        if scan_type is None:
+            st.error("❌ Invalid input. Only MRI / CT / PET scans are allowed.")
+            st.stop()
 
-        with st.spinner("Analyzing brain structure..."):
-            import time
-            time.sleep(1)
+        col_img, col_res = st.columns([1, 1])
 
-            # 🔹 Preprocess
-            gray = user_img.resize((128,128)).convert('L')
-            arr = np.array(gray)
+        with col_img:
+            st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+            st.image(user_img, caption=f"{scan_type} Scan", use_column_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
-            # 🔹 Features
-            entropy = skimage.measure.shannon_entropy(arr)
-            dark_ratio = np.sum(arr < 50) / arr.size
-            edge = filters.sobel(arr)
-            edge_density = np.mean(edge)
+        with col_res:
+            st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
 
-            # 🔹 Improved scoring (more stable)
-            score = (entropy/8)*0.6 + dark_ratio*0.25 + edge_density*5*0.15
+            st.success(f"✅ Detected Scan Type: {scan_type}")
+            st.markdown("#### ⚙️ AI Inference Engine")
 
-            # 🔹 Prediction
-            if score > 0.5:
-                pred = "Non-Demented"
-                color = "#10b981"
-                conf = score*100
-            else:
-                pred = "Demented"
-                color = "#ef4444"
-                conf = (1-score)*100
+            with st.spinner("Analyzing brain structure..."):
+                import time
+                time.sleep(1)
 
-            # ✅ OUTPUT
-            st.markdown(f"<h3 style='color:{color}'>Prediction: {pred}</h3>", unsafe_allow_html=True)
-            st.progress(int(conf))
-            st.write(f"Confidence: {conf:.2f}%")
+                # 🔹 Preprocess
+                gray = user_img.resize((128, 128)).convert('L')
+                arr = np.array(gray)
 
-            st.markdown("---")
-            st.write("### Extracted Features")
-            st.write(f"Entropy: `{entropy:.3f}`")
-            st.write(f"Dark Pixel Ratio: `{dark_ratio:.3f}`")
-            st.write(f"Edge Density: `{edge_density:.4f}`")
-            st.write(f"Resolution: `{user_img_np.shape[1]} x {user_img_np.shape[0]}`")
+                # 🔹 Feature Extraction
+                entropy = skimage.measure.shannon_entropy(arr)
+                dark_ratio = np.sum(arr < 50) / arr.size
+                edge = filters.sobel(arr)
+                edge_density = np.mean(edge)
 
-        st.markdown("</div>", unsafe_allow_html=True)
+                # 🔹 Scoring Logic
+                score = (entropy / 8) * 0.6 + dark_ratio * 0.25 + edge_density * 5 * 0.15
 
+                # 🔹 Prediction
+                if score > 0.5:
+                    pred = "Non-Demented"
+                    color = "#10b981"
+                    conf = score * 100
+                else:
+                    pred = "Demented"
+                    color = "#ef4444"
+                    conf = (1 - score) * 100
+
+                # 🔹 Output
+                st.markdown(f"<h3 style='color:{color}'>Prediction: {pred}</h3>", unsafe_allow_html=True)
+                st.progress(int(conf))
+                st.write(f"Confidence: {conf:.2f}%")
+
+                st.markdown("---")
+                st.write("### Extracted Features")
+                st.write(f"Entropy: `{entropy:.3f}`")
+                st.write(f"Dark Pixel Ratio: `{dark_ratio:.3f}`")
+                st.write(f"Edge Density: `{edge_density:.4f}`")
+                st.write(f"Resolution: `{user_img_np.shape[1]} x {user_img_np.shape[0]}`")
+
+            st.markdown("</div>", unsafe_allow_html=True)
