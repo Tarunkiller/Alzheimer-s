@@ -413,13 +413,14 @@ elif selected == "Diagnostic Sandbox":
 
         # MRI scoring
         mri_score = 0
-        if color_var < 1800: mri_score += 1
+        if color_var < 1500: mri_score += 1
         if edge_density > 0.005: mri_score += 1
         if dark_ratio > 0.02: mri_score += 1
 
         # CT scoring
         ct_score = 0
-        if bright_ratio > 0.05: ct_score += 1
+        if very_bright_ratio > 0.02: ct_score += 1
+        if bright_ratio>0.008: ct_score +=1
         if edge_density > 0.01: ct_score += 1
         if color_var < 2000: ct_score += 1
 
@@ -431,13 +432,17 @@ elif selected == "Diagnostic Sandbox":
         scores = {"MRI": mri_score, "CT": ct_score, "PET": pet_score}
         best_type = max(scores, key=scores.get)
 
-        if scores[best_type] < 2:
+       # 🔥 PRIORITY FIX
+        if ct_score >= 2:
+            best_type = "CT"
+        elif mri_score >= 2:
+            best_type = "MRI"
+        elif pet_score >= 2:
+            best_type = "PET"
+        else:
             return None, scores
 
         return best_type, scores
-
-
-    if uploaded_file is not None:
 
         user_img = Image.open(uploaded_file).convert('RGB')
         user_img_np = np.array(user_img)
