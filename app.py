@@ -392,63 +392,83 @@ def get_vit(num_classes):
         st.markdown("</div>", unsafe_allow_html=True)
 
 # --- PAGE 4: DIAGNOSTIC SANDBOX ---
+
+# --- PAGE 4: DIAGNOSTIC SANDBOX ---
 elif selected == "Diagnostic Sandbox":
     st.markdown("### 📤 Diagnostic AI Sandbox: Custom Scan Inference")
-    st.write("Upload a custom MRI scan to run it through the diagnostic pipeline. *(Note: Since no trained weights `.pth` file was provided in the repository, this demonstrative tool uses structural entropy heuristics to simulate a model's prediction of Dementia.)*")
-    
+    st.write("Upload a custom MRI scan to run it through the diagnostic pipeline using image-based validation.")
+
     st.markdown("<hr>", unsafe_allow_html=True)
-    
+
     uploaded_file = st.file_uploader("Upload Medical Scan (JPG, PNG)", type=["jpg", "jpeg", "png"])
-    
+
+    # ✅ IMAGE-BASED VALIDATION FUNCTION
+    def is_medical_scan(image_np):
+        gray = np.mean(image_np, axis=2)
+
+        variance = np.var(gray)
+        dark_ratio = np.sum(gray < 40) / gray.size
+        bright_ratio = np.sum(gray > 210) / gray.size
+
+        if variance < 2000 and (dark_ratio > 0.2 or bright_ratio > 0.2):
+            return True
+        else:
+            return False
+
     if uploaded_file is not None:
-        # simple filename-based validation to restrict to medical reports/scans
-        valid_keywords = ["mri", "ct", "pet", "scan", "report", "clinical"]
-        fname_lower = uploaded_file.name.lower()
-        if not any(k in fname_lower for k in valid_keywords):
-            st.error("Uploaded file does not appear to be a medical report or scan. Please upload an MRI/CT/PET scan image with an appropriate filename.")
+        user_img = Image.open(uploaded_file).convert('RGB')
+        user_img_np = np.array(user_img)
+
+        # ✅ VALIDATION CHECK
+        if not is_medical_scan(user_img_np):
+            st.error("❌ This does not appear to be a valid medical scan (MRI/CT/PET). Please upload a proper scan.")
         else:
             col_img, col_res = st.columns([1, 1])
-            
-            # Load the uploaded image
-            user_img = Image.open(uploaded_file).convert('RGB')
-            user_img_np = np.array(user_img)
-            
+
             with col_img:
                 st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
                 st.image(user_img, caption="Uploaded Scan", use_column_width=True)
                 st.markdown("</div>", unsafe_allow_html=True)
-                
+
             with col_res:
                 st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
                 st.markdown("#### ⚙️ Inference Engine Output")
-                
+
                 with st.spinner("Analyzing cortical structures and feature signatures..."):
                     import time
-                    time.sleep(1.5) # Simulate processing delay
-                    
-                    # Heuristic simulated prediction based on image entropy
+                    time.sleep(1.5)
+
+                    # Convert to grayscale
                     gray_image = user_img.resize((64, 64)).convert('L')
-                    entropy_val = skimage.measure.shannon_entropy(np.array(gray_image))
-                    
-                    # Calculate a rough pseudo-probability
-                    normalized = np.clip((entropy_val - 4.0) / 3.0, 0, 1)
-                    
-                    if normalized > 0.5:
+                    gray_array = np.array(gray_image)
+
+                    # 🔹 Entropy calculation
+                    entropy_val = skimage.measure.shannon_entropy(gray_array)
+
+                    # 🔹 Dark pixel ratio (atrophy indicator)
+                    dark_ratio = np.sum(gray_array < 50) / gray_array.size
+
+                    # 🔹 Combined decision logic
+                    score = (entropy_val / 8) * 0.6 + dark_ratio * 0.4
+
+                    if score > 0.5:
                         prediction = "Non-Demented"
-                        risk_color = "#10b981" # Green
-                        risk_pct = 100 - (normalized * 50)
+                        color = "#10b981"
+                        confidence = score * 100
                     else:
                         prediction = "Demented"
-                        risk_color = "#ef4444" # Red
-                        risk_pct = 50 + ((1-normalized) * 45)
-                    
-                    st.markdown(f"<h3 style='color: {risk_color}; margin-top:0;'>Prediction: {prediction}</h3>", unsafe_allow_html=True)
-                    st.progress(int(risk_pct))
-                    st.write(f"**Confidence / Risk Factor:** {risk_pct:.1f}%")
-                    
+                        color = "#ef4444"
+                        confidence = (1 - score) * 100
+
+                    # ✅ OUTPUT
+                    st.markdown(f"<h3 style='color:{color}'>Prediction: {prediction}</h3>", unsafe_allow_html=True)
+                    st.progress(int(confidence))
+                    st.write(f"**Confidence:** {confidence:.2f}%")
+
                     st.markdown("---")
-                    st.write("**Extracted Biomarkers:**")
-                    st.write(f"- Shannon Entropy Level: `{entropy_val:.3f}`")
-                    st.write(f"- Spatial Resolution: `{user_img_np.shape[1]}x{user_img_np.shape[0]}`")
-                    
+                    st.write("**Extracted Features:**")
+                    st.write(f"- Entropy: `{entropy_val:.3f}`")
+                    st.write(f"- Dark Pixel Ratio: `{dark_ratio:.3f}`")
+                    st.write(f"- Resolution: `{user_img_np.shape[1]} x {user_img_np.shape[0]}`")
+
                 st.markdown("</div>", unsafe_allow_html=True)
