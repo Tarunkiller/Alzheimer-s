@@ -410,11 +410,35 @@ elif selected == "Diagnostic Sandbox":
         user_img = Image.open(uploaded_file).convert('RGB')
         user_img_np = np.array(user_img)
 
+        # --- VALIDATION: Only accept medical scans ---
         col_img, col_res = st.columns([1, 1])
 
         with col_img:
             st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
             st.image(user_img, caption="Uploaded Scan", use_column_width=True)
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+            st.markdown("<div class='metric-card'>", unsafe_allow_html=True)
+            st.markdown("#### 🔍 Input Validation Processing")
+            
+            color_var = np.mean(np.var(user_img_np, axis=2))
+            gray_image = np.mean(user_img_np, axis=2)
+            dark_ratio = np.sum(gray_image < 50) / gray_image.size
+            bright_ratio = np.sum(gray_image > 200) / gray_image.size
+
+            st.write(f"- **Color Variance Processing:** `{color_var:.2f}`")
+            st.write(f"- **Dark (Background) Ratio:** `{dark_ratio*100:.1f}%`")
+            st.write(f"- **Brightness Ratio:** `{bright_ratio*100:.1f}%`")
+
+            # Medical scans have significant dark backgrounds (>10%). 
+            # We allow a color variance up to 2500 to accommodate blue-tinted or false-colored MRI exports.
+            # Regular colorful posters/photos will fail this test due to high color variance or low dark ratio.
+            if color_var > 2500 or dark_ratio < 0.10:
+                st.error("❌ Decision: Not a medical scan. Input strictly NOT allowed.")
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.stop()
+            else:
+                st.success("✅ Decision: Medical report detected. Input allowed.")
             st.markdown("</div>", unsafe_allow_html=True)
 
         with col_res:
